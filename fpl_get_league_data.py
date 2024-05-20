@@ -1,70 +1,76 @@
-import requests
 import json
+import requests
+import csv
 
-"""
-This file is used to save data for the league code: 411316
-"""
+# Constants
+LEAGUE_CODE = '411316'
+INPUT_FILE = f'fpl_raw_data_league_data_{LEAGUE_CODE}.json'
+OUTPUT_FILE = f'fpl_cleaning_data_league_data_{LEAGUE_CODE}.csv'
+IMAGE_URL = 'black_image_url'  # Replace with the actual URL of the black image
 
-# Define constants
-LEAGUE_CODE = '411316'  # Replace with your actual league code
-OUTPUT_FILE = f'fpl_raw_data_league_data_{LEAGUE_CODE}.json'
+# Load the JSON data
+def load_json(filename):
+    with open(filename, 'r') as f:
+        data = json.load(f)
+    return data
 
-# Function to get general FPL data
-def get_general_data():
-    url = 'https://fantasy.premierleague.com/api/bootstrap-static/'
-    response = requests.get(url)
-    return response.json()
+# Extract the first name from the full name
+def get_first_name(full_name):
+    return full_name.split()[0]
 
-# Function to get league data
-def get_league_data(league_code):
-    url = f'https://fantasy.premierleague.com/api/leagues-classic/{league_code}/standings/'
-    response = requests.get(url)
-    return response.json()
-
-# Function to get team data
-def get_team_data(team_id):
+# Fetch detailed team data including negative points from transfers
+def get_team_history(team_id):
     url = f'https://fantasy.premierleague.com/api/entry/{team_id}/history/'
     response = requests.get(url)
     return response.json()
 
-# Function to collect data for each team in the league
-def collect_fpl_data(league_code):
-    league_data = get_league_data(league_code)
-    teams = league_data['standings']['results']
+# Structure the data for CSV
+def structure_data(data):
+    structured_data = []
     
-    all_teams_data = []
-    
-    for team in teams:
-        team_id = team['entry']
-        team_name = team['entry_name']
-        manager_name = team['player_name']
+    for team in data:
+        first_name = get_first_name(team['manager_name'])
+        team_id = team['team_id']
+        team_history = get_team_history(team_id)
         
-        team_data = get_team_data(team_id)
-        
-        gw_points = [gw['points'] for gw in team_data['current']]
-        total_points = sum(gw_points)
-        
-        team_info = {
-            'team_id': team_id,
-            'team_name': team_name,
-            'manager_name': manager_name,
-            'gw_points': gw_points,
-            'total_points': total_points
+        team_row = {
+            'Player Name': first_name,
+            'Team Name': team['team_name'],
+            'Image URL': IMAGE_URL
         }
         
-        all_teams_data.append(team_info)
+        # Initialize cumulative points
+        cumulative_points = 0
+        
+        # Add cumulative GW points including transfer deductions
+        for i in range(1, 39):
+            gw_key = f'Gameweek {i}'
+            if i <= len(team_history['current']):
+                gw_points = team_history['current'][i-1]['points'] - team_history['current'][i-1].get('event_transfers_cost', 0)
+                cumulative_points += gw_points
+            else:
+                gw_points = 0
+            team_row[gw_key] = cumulative_points
+        
+        structured_data.append(team_row)
     
-    return all_teams_data
+    return structured_data
 
-# Save data to a file
-def save_data_to_file(data, filename):
-    with open(filename, 'w') as f:
-        json.dump(data, f, indent=4)
+# Save the data to a CSV file
+def save_to_csv(data, filename):
+    if data:
+        fieldnames = list(data[0].keys())
+        
+        with open(filename, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
 
-# Main function to run the script
+# Main function to execute the script
 def main():
-    fpl_data = collect_fpl_data(LEAGUE_CODE)
-    save_data_to_file(fpl_data, OUTPUT_FILE)
+    json_data = load_json(INPUT_FILE)
+    structured_data = structure_data(json_data)
+    save_to_csv(structured_data, OUTPUT_FILE)
     print(f"Data saved to {OUTPUT_FILE}")
 
 if __name__ == '__main__':
